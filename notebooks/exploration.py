@@ -12,7 +12,7 @@ print("=" * 50)
 print("SENSANTE - Exploration du dataset")
 print("=" * 50)
 
-# Dimensions du dataset
+# Dimensions du dataset_
 print(f"\nNombre de patients : {len(df)}")
 print(f"Nombre de colonnes : {df.shape[1]}")
 print(f"Colonnes : {list(df.columns)}")

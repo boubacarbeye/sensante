@@ -18,7 +18,7 @@ des maladies courantes comme le paludisme, la grippe et la typhoïde,
 
 ## Auteur
 
-Moussa Diallo - L2 GLSI - ESP/UCAD
+Boubacar Beye - DUT2 INFO  - ESP/UCAD
 
 ## Cours
 
