@@ -4,8 +4,48 @@
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from fastapi.middleware.cors import CORSMiddleware
 import joblib
 import numpy as np
+import os
+from dotenv import load_dotenv
+from groq import Groq
+
+# Charger les variables d'environnement
+load_dotenv()
+
+# Client Groq (chargé au démarrage)
+groq_client = None
+groq_api_key = os.getenv("GROQ_API_KEY")
+
+if groq_api_key:
+    groq_client = Groq(api_key=groq_api_key)
+    print("Client Groq initialisé.")
+else:
+    print(
+        "ATTENTION : GROQ_API_KEY non trouvée. "
+        "/explain sera désactivé."
+    )
+
+
+
+class ExplainInput(BaseModel):
+    diagnostic: str = Field(...,
+        description="Diagnostic prédit par le modèle")
+    probabilite: float = Field(...,
+        description="Probabilité du diagnostic")
+    age: int = Field(...)
+    sexe: str = Field(...)
+    temperature: float = Field(...)
+    region: str = Field(...)
+
+
+class ExplainOutput(BaseModel):
+    explication: str = Field(...,
+        description="Explication en français")
+    modele_llm: str = Field(
+        default="llama-3.1-8b-instant",
+        description="Modèle LLM utilisé")
 
 # --- Schemas Pydantic ---
 class PatientInput(BaseModel):
@@ -31,6 +71,16 @@ app = FastAPI(
     version="0.2.0"
 )
 
+
+    # Autoriser les requêtes depuis le frontend
+app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # En dev : tout accepter
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+)
+
 # --- Chargement du modele (une seule fois) ---
 print("Chargement du modele...")
 model = joblib.load("models/model.pkl")
@@ -45,6 +95,65 @@ print(f"Modele charge : {list(model.classes_)}")
 def health_check():
     return {"status": "ok", "message": "SenSante API is running"}
 
+@app.get("/model-info")
+def model_info():
+    return {
+        "model_type": type(model).__name__,
+        "n_estimators": getattr(model, "n_estimators", "N/A"),
+        "classes": list(model.classes_),
+        "n_features": len(feature_cols)
+    }
+
+SYSTEM_PROMPT = """Tu es un assistant médical sénégalais.
+Tu reçois un diagnostic et des données patient.
+Explique le résultat en français simple,
+comme un médecin parlerait à son patient.
+Sois rassurant mais recommande toujours
+une consultation médicale.
+Maximum 3 phrases.
+Ne fais JAMAIS de diagnostic toi-même.
+Tu expliques uniquement le diagnostic fourni."""
+
+
+@app.post("/explain", response_model=ExplainOutput)
+def explain(data: ExplainInput):
+    """Expliquer un diagnostic en français avec un LLM."""
+    if not groq_client:
+        return ExplainOutput(
+            explication=(
+                "Service d'explication indisponible. "
+                "Clé API non configurée."
+            ),
+            modele_llm="aucun"
+        )
+
+    # Construire le user prompt
+    user_prompt = (
+        f"Patient : {data.sexe}, {data.age} ans, "
+        f"région {data.region}\n"
+        f"Température : {data.temperature}°C\n"
+        f"Diagnostic du modèle : {data.diagnostic} "
+        f"(probabilité {data.probabilite:.0%})\n"
+        f"Explique ce résultat au patient."
+    )
+
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=200,
+            temperature=0.3
+        )
+        explication = response.choices[0].message.content
+
+    except Exception as e:
+        explication = f"Erreur lors de l'appel au LLM : {str(e)}"
+        
+    return ExplainOutput ( explication = explication )
+    
 @app.post("/predict", response_model=DiagnosticOutput)
 def predict(patient: PatientInput):
 
@@ -81,6 +190,7 @@ def predict(patient: PatientInput):
         region_enc
     ]])
 
+
     # Prediction
     diagnostic = model.predict(features)[0]
     proba_max = float(model.predict_proba(features)[0].max())
@@ -104,3 +214,5 @@ def predict(patient: PatientInput):
         confiance=confiance,
         message=messages.get(diagnostic, "Consultez un medecin.")
     )
+
+   

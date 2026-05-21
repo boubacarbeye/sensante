@@ -19,4 +19,7 @@ Thumbs.db
 
 #Fichiers temporaires matplotlib
 *. png
-! figures /*. png
+! figures /*.png
+ 
+# Cles API - NE JAMAIS COMMITTER
+.env
